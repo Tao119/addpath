@@ -1,4 +1,6 @@
 use clap::{App, Arg};
+use colored::*;
+use crossterm::style::Stylize;
 use std::collections::HashSet;
 use std::env;
 use std::fs::read_to_string;
@@ -12,7 +14,7 @@ use walkdir::{DirEntry, WalkDir};
 fn main() {
     let matches = App::new("addpath")
         .version("1.0")
-        .author("Your Name")
+        .author("Tao119")
         .about("Automatically adds paths to your shell configuration")
         .arg(
             Arg::with_name("pkgname")
@@ -49,7 +51,7 @@ fn main() {
     let mut candidates = Vec::new();
 
     for dir in &search_dirs {
-        println!("Checking directory: {}", dir);
+        println!("{}", format!("Checking directory: {}", dir).dark_green());
         for entry in WalkDir::new(dir)
             .into_iter()
             .filter_entry(is_not_skippable)
@@ -71,11 +73,38 @@ fn main() {
 
     remove_duplicates(&mut candidates);
 
+    let home_dir = dirs::home_dir().expect("Failed to find home directory");
+    let shell_path = env::var("SHELL").unwrap_or_default();
+    let config_file = if shell_path.ends_with("/bash") {
+        "bashrc"
+    } else if shell_path.ends_with("/zsh") {
+        "zshrc"
+    } else {
+        eprintln!("Unsupported shell");
+        return;
+    };
+
+    let mut config_path = home_dir;
+    config_path.push(format!(".{}", config_file));
+    let source_config_path = config_path.clone();
+
+    let existing_contents = read_to_string(&config_path).unwrap_or_default();
+
     if candidates.is_empty() {
         println!("No paths found. Consider broadening your search.");
     } else {
         for (index, path) in candidates.iter().enumerate() {
-            println!("{}: {}", index, path.display());
+            let path_str = format!("{}", path.display());
+            if existing_contents.contains(&path.display().to_string()) {
+                println!(
+                    "{}: {} {}",
+                    index,
+                    path_str.bright_black(),
+                    "(already exists)".to_string().red()
+                );
+            } else {
+                println!("{}: {}", index, path_str.bright_yellow());
+            }
         }
         println!("Select the path to add by number: ");
         let index: usize;
@@ -95,41 +124,37 @@ fn main() {
                     }
                 }
             } else {
-                println!("Please enter a valid number.");
+                println!("{}", "Please enter a valid number.".to_string().red());
             }
             selection.clear();
         }
 
         if let Some(selected_path) = candidates.get(index) {
-            let home_dir = dirs::home_dir().expect("Failed to find home directory");
-            let shell_path = env::var("SHELL").unwrap_or_default();
-            let config_file = if shell_path.ends_with("/bash") {
-                "bashrc"
-            } else if shell_path.ends_with("/zsh") {
-                "zshrc"
-            } else {
-                eprintln!("Unsupported shell");
-                return;
-            };
-
-            let mut config_path = home_dir;
-            config_path.push(format!(".{}", config_file));
-            let source_config_path = config_path.clone();
-
-            let existing_contents = read_to_string(&config_path).unwrap_or_default();
-
             let path_str = format!("\nexport PATH=\"$PATH:{}\"", selected_path.display());
             if !existing_contents.contains(&path_str) {
                 append_to_file(config_path, &path_str);
+                println!();
                 println!("Added the following line to your {} file:", config_file);
-                println!("{}", path_str);
+                println!(
+                    "export PATH=\"$PATH:\"{}\"",
+                    selected_path.display().to_string().bright_yellow()
+                );
 
                 let source_command = format!("source {}", source_config_path.to_string_lossy());
-                Command::new("sh")
-                    .arg("-c")
-                    .arg(source_command)
-                    .spawn()
-                    .expect("Failed to source the shell configuration file");
+
+                println!();
+                println!(
+                    "{}\n{}\n{}",
+                    "finished setting the path!"
+                        .to_string()
+                        .bright_blue()
+                        .bold(),
+                    "Please run the following command to update your shell environment:"
+                        .to_string()
+                        .bright_blue()
+                        .bold(),
+                    source_command.yellow().bold()
+                )
             } else {
                 println!("Path already exists in the {} file.", config_file);
             }
